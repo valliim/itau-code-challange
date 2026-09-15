@@ -2,9 +2,9 @@
 set -euo pipefail
 
 ENDPOINT_URL="${DYNAMODB_ENDPOINT_URL:-http://dynamodb:8000}"
-TABLE_NAME="${GREETING_TABLE_NAME:-GreetingMessages}"
+ACCOUNTS_TABLE_NAME="${ACCOUNTS_TABLE_NAME:-Accounts}"
+TRANSACTIONS_TABLE_NAME="${TRANSACTIONS_TABLE_NAME:-Transactions}"
 REGION="${AWS_DEFAULT_REGION:-us-east-1}"
-SEED_FILE="/dynamodb-seed/greeting-messages.json"
 
 echo "Waiting for DynamoDB Local at ${ENDPOINT_URL}..."
 until aws dynamodb list-tables --endpoint-url "${ENDPOINT_URL}" --region "${REGION}" >/dev/null 2>&1; do
@@ -13,36 +13,30 @@ until aws dynamodb list-tables --endpoint-url "${ENDPOINT_URL}" --region "${REGI
 done
 echo "DynamoDB Local is ready."
 
-if aws dynamodb describe-table --table-name "${TABLE_NAME}" --endpoint-url "${ENDPOINT_URL}" --region "${REGION}" >/dev/null 2>&1; then
-  echo "Table '${TABLE_NAME}' already exists, skipping creation."
-else
-  echo "Creating table '${TABLE_NAME}'..."
-  aws dynamodb create-table \
-    --table-name "${TABLE_NAME}" \
-    --attribute-definitions AttributeName=id,AttributeType=S \
-    --key-schema AttributeName=id,KeyType=HASH \
-    --billing-mode PAY_PER_REQUEST \
-    --endpoint-url "${ENDPOINT_URL}" \
-    --region "${REGION}" >/dev/null
-  aws dynamodb wait table-exists \
-    --table-name "${TABLE_NAME}" \
-    --endpoint-url "${ENDPOINT_URL}" \
-    --region "${REGION}"
-  echo "Table '${TABLE_NAME}' created."
-fi
+create_table_if_absent() {
+  local table_name="$1"
+  local key_attribute="$2"
 
-echo "Seeding greeting messages from ${SEED_FILE}..."
-aws dynamodb batch-write-item \
-  --request-items "file://${SEED_FILE}" \
-  --endpoint-url "${ENDPOINT_URL}" \
-  --region "${REGION}" >/dev/null
+  if aws dynamodb describe-table --table-name "${table_name}" --endpoint-url "${ENDPOINT_URL}" --region "${REGION}" >/dev/null 2>&1; then
+    echo "Table '${table_name}' already exists, skipping creation."
+  else
+    echo "Creating table '${table_name}'..."
+    aws dynamodb create-table \
+      --table-name "${table_name}" \
+      --attribute-definitions AttributeName="${key_attribute}",AttributeType=S \
+      --key-schema AttributeName="${key_attribute}",KeyType=HASH \
+      --billing-mode PAY_PER_REQUEST \
+      --endpoint-url "${ENDPOINT_URL}" \
+      --region "${REGION}" >/dev/null
+    aws dynamodb wait table-exists \
+      --table-name "${table_name}" \
+      --endpoint-url "${ENDPOINT_URL}" \
+      --region "${REGION}"
+    echo "Table '${table_name}' created."
+  fi
+}
 
-COUNT=$(aws dynamodb scan \
-  --table-name "${TABLE_NAME}" \
-  --endpoint-url "${ENDPOINT_URL}" \
-  --region "${REGION}" \
-  --select COUNT \
-  --query 'Count' \
-  --output text)
+create_table_if_absent "${ACCOUNTS_TABLE_NAME}" "accountId"
+create_table_if_absent "${TRANSACTIONS_TABLE_NAME}" "transactionId"
 
-echo "Seed complete. '${TABLE_NAME}' now has ${COUNT} item(s)."
+echo "Seed complete. '${ACCOUNTS_TABLE_NAME}' and '${TRANSACTIONS_TABLE_NAME}' are ready."

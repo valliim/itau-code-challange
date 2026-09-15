@@ -8,7 +8,7 @@ plugins {
 
 group = "br.com.itau"
 version = "0.0.1-SNAPSHOT"
-description = "itau-code-challange-starter-kit"
+description = "itau-code-challange"
 
 java {
 	toolchain {
@@ -23,11 +23,18 @@ repositories {
 dependencies {
 	implementation(platform("software.amazon.awssdk:bom:2.46.7"))
 	implementation("org.springframework.boot:spring-boot-starter-webmvc")
+	implementation("org.springframework.boot:spring-boot-starter-validation")
+	implementation("org.springframework.boot:spring-boot-starter-actuator")
 	implementation("org.jetbrains.kotlin:kotlin-reflect")
 	implementation("tools.jackson.module:jackson-module-kotlin")
 	implementation("software.amazon.awssdk:dynamodb")
 	implementation("org.springframework.boot:spring-boot-starter-kafka")
+	implementation("io.github.resilience4j:resilience4j-spring-boot3:2.2.0")
+	implementation("io.github.resilience4j:resilience4j-kotlin:2.2.0")
+	implementation("org.aspectj:aspectjweaver:1.9.22.1")
+	implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.2")
 	testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
+	testImplementation("org.springframework.boot:spring-boot-restclient")
 	testImplementation("org.jetbrains.kotlin:kotlin-test-junit5")
 	testImplementation("com.lemonappdev:konsist:0.17.3")
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
@@ -46,7 +53,7 @@ sourceSets {
 		kotlin.srcDir("src/integrationTest/kotlin")
 		resources.srcDir("src/integrationTest/resources")
 		compileClasspath += sourceSets.main.get().output + sourceSets.test.get().output
-		runtimeClasspath += sourceSets.main.get().output + sourceSets.test.get().output
+		runtimeClasspath += output + sourceSets.main.get().output + sourceSets.test.get().output
 	}
 }
 
@@ -72,6 +79,10 @@ jacoco {
 	toolVersion = "0.8.12"
 }
 
+tasks.test {
+	finalizedBy(tasks.jacocoTestReport)
+}
+
 tasks.withType<Test> {
 	useJUnitPlatform()
 	finalizedBy(tasks.jacocoTestReport)
@@ -83,19 +94,19 @@ tasks.withType<Test> {
 	}
 
 	addTestListener(
-		object : org.gradle.api.tasks.testing.TestListener {
-			override fun beforeSuite(suite: org.gradle.api.tasks.testing.TestDescriptor) = Unit
+		object : TestListener {
+			override fun beforeSuite(suite: TestDescriptor) = Unit
 
-			override fun beforeTest(testDescriptor: org.gradle.api.tasks.testing.TestDescriptor) = Unit
+			override fun beforeTest(testDescriptor: TestDescriptor) = Unit
 
 			override fun afterTest(
-				testDescriptor: org.gradle.api.tasks.testing.TestDescriptor,
-				result: org.gradle.api.tasks.testing.TestResult,
+				testDescriptor: TestDescriptor,
+				result: TestResult,
 			) = Unit
 
 			override fun afterSuite(
-				suite: org.gradle.api.tasks.testing.TestDescriptor,
-				result: org.gradle.api.tasks.testing.TestResult,
+				suite: TestDescriptor,
+				result: TestResult,
 			) {
 				if (suite.className != null) {
 					val outcome = if (result.failedTestCount == 0L) "PASSED" else "FAILED"
@@ -117,7 +128,6 @@ tasks.withType<Test> {
 
 val jacocoCoverageExclusions =
 	listOf(
-		// Framework bootstrap: `main` is never invoked by tests, only Spring's test context machinery.
 		"br/com/itau/challenge/ApplicationKt.class",
 		"br/com/itau/challenge/Application.class",
 	)

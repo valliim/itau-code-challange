@@ -1,0 +1,55 @@
+### Authorize a credit transaction
+POST http://localhost:8080/transactions/8e8ae808-b154-48b5-9f3e-553935cc4543
+Content-Type: application/json
+Accept: application/json
+
+{
+  "account_id": "5b19c8b6-8cc4-4c72-8989-8c2ce15fa975",
+  "type": "CREDIT",
+  "amount": {
+    "value": 97.07,
+    "currency": "BRL"
+  }
+}
+
+### Authorize a debit transaction
+POST http://localhost:8080/transactions/7d1c9a5e-8b1b-4b8e-9e2b-2b2e7b4b9a11
+Content-Type: application/json
+Accept: application/json
+
+{
+  "account_id": "5b19c8b6-8cc4-4c72-8989-8c2ce15fa975",
+  "type": "DEBIT",
+  "amount": {
+    "value": 20.00,
+    "currency": "BRL"
+  }
+}
+
+### Replaying the same transactionId returns the already persisted result
+POST http://localhost:8080/transactions/8e8ae808-b154-48b5-9f3e-553935cc4543
+Content-Type: application/json
+Accept: application/json
+
+{
+  "account_id": "5b19c8b6-8cc4-4c72-8989-8c2ce15fa975",
+  "type": "CREDIT",
+  "amount": {
+    "value": 97.07,
+    "currency": "BRL"
+  }
+}
+
+### Invalid transaction type should respond with a JSON 400 error
+POST http://localhost:8080/transactions/9f2c9a5e-8b1b-4b8e-9e2b-2b2e7b4b9a22
+Content-Type: application/json
+Accept: application/json
+
+{
+  "account_id": "5b19c8b6-8cc4-4c72-8989-8c2ce15fa975",
+  "type": "INVALID",
+  "amount": {
+    "value": 20.00,
+    "currency": "BRL"
+  }
+}

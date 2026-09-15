@@ -1,10 +1,10 @@
 spring:
   application:
-    name: itau-code-challange-starter-kit
+    name: itau-code-challange
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:19092}
     consumer:
-      group-id: ${KAFKA_CONSUMER_GROUP_ID:hello-greeting-template-consumer}
+      group-id: ${KAFKA_CONSUMER_GROUP_ID:authorization-account-created-consumer}
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
@@ -12,7 +12,56 @@ spring:
 dynamodb:
   endpoint: ${DYNAMODB_ENDPOINT:http://localhost:8000}
   region: ${DYNAMODB_REGION:us-east-1}
-  table-name: ${GREETING_TABLE_NAME:GreetingMessages}
+  accounts-table-name: ${ACCOUNTS_TABLE_NAME:Accounts}
+  transactions-table-name: ${TRANSACTIONS_TABLE_NAME:Transactions}
 
-greeting-templates:
-  topic-name: ${GREETING_TEMPLATES_TOPIC:greeting-templates}
+accounts:
+  topic-name: ${ACCOUNTS_TOPIC:conta-bancaria-criada}
+
+logging:
+  level:
+    br.com.itau.challenge: ${LOG_LEVEL_APP:INFO}
+  pattern:
+    level: '%5p [transactionId=%X{transactionId:-} accountId=%X{accountId:-}]'
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,circuitbreakerevents,circuitbreakers
+  endpoint:
+    health:
+      show-details: always
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+  api-docs:
+    path: /v3/api-docs
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      dynamodb:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50.0
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+        record-exceptions:
+          - software.amazon.awssdk.core.exception.SdkException
+          - java.io.IOException
+        ignore-exceptions:
+          - software.amazon.awssdk.services.dynamodb.model.ConditionalCheckFailedException
+  retry:
+    instances:
+      dynamodb:
+        max-attempts: 3
+        wait-duration: 100ms
+        retry-exceptions:
+          - software.amazon.awssdk.core.exception.SdkException
+          - java.io.IOException
+        ignore-exceptions:
+          - software.amazon.awssdk.services.dynamodb.model.ConditionalCheckFailedException
