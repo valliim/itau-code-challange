@@ -8,15 +8,24 @@ services:
     environment:
       DYNAMODB_ENDPOINT: http://dynamodb:8000
       DYNAMODB_REGION: us-east-1
+      DYNAMODB_USE_STATIC_CREDENTIALS: "true"
+      DYNAMODB_STATIC_ACCESS_KEY: local
+      DYNAMODB_STATIC_SECRET_KEY: local
       ACCOUNTS_TABLE_NAME: Accounts
       TRANSACTIONS_TABLE_NAME: Transactions
       KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
       ACCOUNTS_TOPIC: conta-bancaria-criada
+      ACCOUNTS_DEAD_LETTER_PARTITIONS: "1"
+      ACCOUNTS_DEAD_LETTER_REPLICATION_FACTOR: "1"
     depends_on:
-      - dynamodb
-      - dynamodb-seed
-      - redpanda
-      - redpanda-seed
+      dynamodb:
+        condition: service_healthy
+      dynamodb-seed:
+        condition: service_completed_successfully
+      redpanda:
+        condition: service_healthy
+      redpanda-seed:
+        condition: service_completed_successfully
 
   dynamodb:
     image: amazon/dynamodb-local:3.3.0
@@ -24,11 +33,17 @@ services:
     working_dir: /home/dynamodblocal
     ports:
       - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'cat < /dev/null > /dev/tcp/localhost/8000'"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
 
   dynamodb-seed:
     image: amazon/aws-cli:2.36.8
     depends_on:
-      - dynamodb
+      dynamodb:
+        condition: service_healthy
     environment:
       AWS_ACCESS_KEY_ID: local
       AWS_SECRET_ACCESS_KEY: local
@@ -43,7 +58,8 @@ services:
   dynamodb-admin:
     image: aaronshaf/dynamodb-admin:5.3.4
     depends_on:
-      - dynamodb
+      dynamodb:
+        condition: service_healthy
     environment:
       DYNAMO_ENDPOINT: http://dynamodb:8000
       AWS_REGION: us-east-1
@@ -69,11 +85,17 @@ services:
       - --default-log-level=info
     ports:
       - "19092:19092"
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health --api-urls localhost:9644"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
 
   redpanda-seed:
     image: docker.redpanda.com/redpandadata/redpanda:v26.1.14
     depends_on:
-      - redpanda
+      redpanda:
+        condition: service_healthy
     environment:
       REDPANDA_BROKERS: redpanda:9092
       ACCOUNTS_TOPIC: conta-bancaria-criada

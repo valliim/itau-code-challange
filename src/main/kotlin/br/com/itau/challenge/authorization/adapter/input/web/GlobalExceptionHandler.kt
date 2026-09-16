@@ -4,6 +4,7 @@ import br.com.itau.challenge.authorization.adapter.input.web.response.ErrorRespo
 import br.com.itau.challenge.authorization.domain.exception.ConcurrentBalanceUpdateException
 import br.com.itau.challenge.authorization.domain.exception.InvalidTransactionException
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException
+import jakarta.validation.ConstraintViolationException
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
@@ -22,6 +23,16 @@ class GlobalExceptionHandler {
     fun handleValidation(exception: MethodArgumentNotValidException): ResponseEntity<ErrorResponse> {
         val message = exception.bindingResult.fieldErrors
             .joinToString(", ") { "${it.field}: ${it.defaultMessage.orEmpty()}" }
+            .ifBlank { "Invalid request payload" }
+
+        logger.warn("Validation failed for request: {}", message)
+        return errorResponse(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", message)
+    }
+
+    @ExceptionHandler(ConstraintViolationException::class)
+    fun handleConstraintViolation(exception: ConstraintViolationException): ResponseEntity<ErrorResponse> {
+        val message = exception.constraintViolations
+            .joinToString(", ") { "${it.propertyPath}: ${it.message}" }
             .ifBlank { "Invalid request payload" }
 
         logger.warn("Validation failed for request: {}", message)

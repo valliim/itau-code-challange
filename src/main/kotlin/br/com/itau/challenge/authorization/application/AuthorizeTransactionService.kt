@@ -12,6 +12,10 @@ import br.com.itau.challenge.authorization.domain.model.TransactionType
 import br.com.itau.challenge.authorization.port.input.AuthorizeTransactionUseCase
 import br.com.itau.challenge.authorization.port.output.AccountRepository
 import br.com.itau.challenge.authorization.port.output.TransactionRepository
+import br.com.itau.challenge.authorization.metrics.MetricsInfo
+import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.core.instrument.Metrics
+import io.micrometer.core.instrument.Timer
 import org.slf4j.LoggerFactory
 import org.slf4j.MDC
 import org.springframework.stereotype.Service
@@ -22,12 +26,15 @@ import java.time.OffsetDateTime
 private const val MAX_BALANCE_UPDATE_ATTEMPTS = 5
 private const val TRANSACTION_ID_MDC_KEY = "transactionId"
 private const val ACCOUNT_ID_MDC_KEY = "accountId"
+private const val ENABLED_ACCOUNT_STATUS = "ENABLED"
+private const val SUPPORTED_CURRENCY = "BRL"
 
 @Service
 class AuthorizeTransactionService(
     private val accountRepository: AccountRepository,
     private val transactionRepository: TransactionRepository,
     private val clock: Clock = Clock.systemDefaultZone(),
+    private val meterRegistry: MeterRegistry = Metrics.globalRegistry,
 ) : AuthorizeTransactionUseCase {
 
     private val logger = LoggerFactory.getLogger(this::class.java)
@@ -38,6 +45,7 @@ class AuthorizeTransactionService(
         type: TransactionType,
         amount: Money,
     ): AuthorizationResult {
+        val timer = Timer.start(meterRegistry)
         MDC.put(TRANSACTION_ID_MDC_KEY, transactionId)
         MDC.put(ACCOUNT_ID_MDC_KEY, accountId)
 
@@ -49,6 +57,7 @@ class AuthorizeTransactionService(
                 amount = amount
             )
         } finally {
+            timer.stop(meterRegistry.timer(MetricsInfo.AUTHORIZATION_DURATION))
             MDC.remove(TRANSACTION_ID_MDC_KEY)
             MDC.remove(ACCOUNT_ID_MDC_KEY)
         }
@@ -75,6 +84,9 @@ class AuthorizeTransactionService(
                 timestamp = timestamp
             )
 
+        validateAccount(account)
+        validateCurrency(account, amount)
+
         return attemptAuthorization(
             transactionId = transactionId,
             type = type,
@@ -91,9 +103,35 @@ class AuthorizeTransactionService(
         }
     }
 
+    private fun validateAccount(account: Account) {
+        if (account.status != ENABLED_ACCOUNT_STATUS) {
+            logger.warn("Authorization declined: account {} is not enabled", account.id)
+            throw InvalidTransactionException("Account ${account.id} is not enabled")
+        }
+    }
+
+    private fun validateCurrency(account: Account, amount: Money) {
+        if (amount.currency != SUPPORTED_CURRENCY || account.balance.currency != SUPPORTED_CURRENCY) {
+            logger.warn(
+                "Authorization rejected: unsupported currency {} for account {}",
+                amount.currency,
+                account.id,
+            )
+            throw InvalidTransactionException("Only $SUPPORTED_CURRENCY transactions are supported")
+        }
+        if (amount.currency != account.balance.currency) {
+            throw InvalidTransactionException("Transaction currency must match account currency")
+        }
+    }
+
     private fun replayIfExists(transactionId: String): AuthorizationResult? =
         transactionRepository.findById(transactionId)?.let { existingTransaction ->
             logger.info("Replaying already processed transaction with status {}", existingTransaction.status)
+            meterRegistry.counter(
+                MetricsInfo.AUTHORIZATION_TRANSACTIONS,
+                MetricsInfo.RESULT_TAG,
+                MetricsInfo.RESULT_REPLAY,
+            ).increment()
 
             when (val account = accountRepository.findById(existingTransaction.accountId)) {
                 null -> {
@@ -117,6 +155,13 @@ class AuthorizeTransactionService(
         timestamp: OffsetDateTime,
     ): AuthorizationResult {
         logger.warn("Authorization declined: account does not exist")
+        meterRegistry.counter(
+            MetricsInfo.AUTHORIZATION_TRANSACTIONS,
+            MetricsInfo.RESULT_TAG,
+            MetricsInfo.RESULT_DECLINED,
+            MetricsInfo.REASON_TAG,
+            MetricsInfo.REASON_ACCOUNT_NOT_FOUND,
+        ).increment()
         return declined(
             Transaction(
                 id = transactionId,
@@ -181,6 +226,13 @@ class AuthorizeTransactionService(
             account.balance.amount,
             amount.amount,
         )
+        meterRegistry.counter(
+            MetricsInfo.AUTHORIZATION_TRANSACTIONS,
+            MetricsInfo.RESULT_TAG,
+            MetricsInfo.RESULT_DECLINED,
+            MetricsInfo.REASON_TAG,
+            MetricsInfo.REASON_INSUFFICIENT_FUNDS,
+        ).increment()
         val failedTransaction =
             Transaction(
                 id = transactionId,
@@ -207,6 +259,7 @@ class AuthorizeTransactionService(
         val updated = accountRepository.updateBalance(accountId = account.id, expectedVersion = account.version, newBalance = newBalance)
 
         if (!updated) {
+            meterRegistry.counter(MetricsInfo.AUTHORIZATION_CONFLICTS).increment()
             if (attempt >= MAX_BALANCE_UPDATE_ATTEMPTS) {
                 logger.error(
                     "Authorization failed: balance update exhausted all {} attempts due to concurrent updates",
@@ -257,6 +310,11 @@ class AuthorizeTransactionService(
             timestamp = timestamp
         )
         transactionRepository.save(succeededTransaction)
+        meterRegistry.counter(
+            MetricsInfo.AUTHORIZATION_TRANSACTIONS,
+            MetricsInfo.RESULT_TAG,
+            MetricsInfo.RESULT_SUCCEEDED,
+        ).increment()
         logger.info("Authorization approved: new balance is {} {}", newBalance.amount, newBalance.currency)
         return AuthorizationResult(transaction = succeededTransaction, accountId = account.id, balance = newBalance)
     }

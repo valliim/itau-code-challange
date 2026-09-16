@@ -32,6 +32,6 @@ data class AmountRequest(
     val value: BigDecimal,
 
     @field:NotBlank(message = "amount.currency must not be blank")
-    @field:Pattern(regexp = "^[A-Z]{3}$", message = "amount.currency must be a valid ISO-4217 code")
+    @field:Pattern(regexp = "BRL", message = "amount.currency must be BRL")
     val currency: String,
 )

@@ -32,6 +32,8 @@ private const val POLL_INTERVAL_MILLIS = 250L
 @AutoConfigureTestRestTemplate
 @TestPropertySource(
     properties = [
+        "dynamodb.endpoint=http://localhost:8000",
+        "dynamodb.use-static-credentials=true",
         $$"spring.kafka.consumer.group-id=authorization-e2e-${random.uuid}",
         "spring.kafka.consumer.auto-offset-reset=earliest",
     ],

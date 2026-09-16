@@ -111,6 +111,64 @@ class AuthorizeTransactionServiceTest {
         assertFailsWith<InvalidTransactionException> {
             service.authorize(defaultTransactionId, defaultAccountId, TransactionType.CREDIT, Money(BigDecimal.ZERO, "BRL"))
         }
+
+        @Test
+        fun `should propagate transaction persistence failure after balance update`() {
+            val accountRepository = InMemoryAccountRepository(listOf(accountOf()))
+            val transactionRepository = object : TransactionRepository {
+                override fun findById(transactionId: String): Transaction? = null
+                override fun save(transaction: Transaction): Unit = error("transaction store unavailable")
+            }
+            val service = AuthorizeTransactionService(accountRepository, transactionRepository, fixedClock)
+
+            assertFailsWith<IllegalStateException> {
+                service.authorize(
+                    defaultTransactionId,
+                    defaultAccountId,
+                    TransactionType.CREDIT,
+                    Money(BigDecimal(10), "BRL"),
+                )
+            }
+            assertEquals(BigDecimal(10), accountRepository.findById(defaultAccountId)?.balance?.amount)
+        }
+
+        @Test
+        fun `should reject a transaction in a currency other than BRL`() {
+            val accountRepository = InMemoryAccountRepository(listOf(accountOf()))
+            val transactionRepository = InMemoryTransactionRepository()
+            val service = AuthorizeTransactionService(accountRepository, transactionRepository, fixedClock)
+
+            val exception = assertFailsWith<InvalidTransactionException> {
+                service.authorize(
+                    defaultTransactionId,
+                    defaultAccountId,
+                    TransactionType.CREDIT,
+                    Money(BigDecimal(10), "USD"),
+                )
+            }
+
+            assertEquals("Only BRL transactions are supported", exception.message)
+            assertEquals(BigDecimal.ZERO, accountRepository.findById(defaultAccountId)?.balance?.amount)
+        }
+
+        @Test
+        fun `should reject a transaction for an account that is not enabled`() {
+            val accountRepository = InMemoryAccountRepository(listOf(accountOf(status = "BLOCKED")))
+            val transactionRepository = InMemoryTransactionRepository()
+            val service = AuthorizeTransactionService(accountRepository, transactionRepository, fixedClock)
+
+            val exception = assertFailsWith<InvalidTransactionException> {
+                service.authorize(
+                    defaultTransactionId,
+                    defaultAccountId,
+                    TransactionType.CREDIT,
+                    Money(BigDecimal(10), "BRL"),
+                )
+            }
+
+            assertEquals("Account $defaultAccountId is not enabled", exception.message)
+            assertEquals(BigDecimal.ZERO, accountRepository.findById(defaultAccountId)?.balance?.amount)
+        }
     }
 
     @Test
@@ -283,11 +341,12 @@ class AuthorizeTransactionServiceTest {
         id: String = defaultAccountId,
         balance: BigDecimal = BigDecimal.ZERO,
         version: Long = 0,
+        status: String = "ENABLED",
     ): Account = Account(
         id = id,
         owner = "owner-1",
         createdAt = 1L,
-        status = "ENABLED",
+        status = status,
         balance = Money(balance, "BRL"),
         version = version
     )

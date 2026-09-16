@@ -10,13 +10,23 @@ spring:
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
 dynamodb:
-  endpoint: ${DYNAMODB_ENDPOINT:http://localhost:8000}
+  endpoint: ${DYNAMODB_ENDPOINT:}
   region: ${DYNAMODB_REGION:us-east-1}
+  use-static-credentials: ${DYNAMODB_USE_STATIC_CREDENTIALS:false}
+  static-access-key: ${DYNAMODB_STATIC_ACCESS_KEY:local}
+  static-secret-key: ${DYNAMODB_STATIC_SECRET_KEY:local}
   accounts-table-name: ${ACCOUNTS_TABLE_NAME:Accounts}
   transactions-table-name: ${TRANSACTIONS_TABLE_NAME:Transactions}
+  api-call-timeout: ${DYNAMODB_API_CALL_TIMEOUT:5s}
+  api-call-attempt-timeout: ${DYNAMODB_API_CALL_ATTEMPT_TIMEOUT:2s}
 
 accounts:
   topic-name: ${ACCOUNTS_TOPIC:conta-bancaria-criada}
+  dead-letter-suffix: ${ACCOUNTS_DEAD_LETTER_SUFFIX:.DLT}
+  retry-interval-millis: ${ACCOUNTS_RETRY_INTERVAL_MILLIS:1000}
+  max-retries: ${ACCOUNTS_MAX_RETRIES:2}
+  dead-letter-partitions: ${ACCOUNTS_DEAD_LETTER_PARTITIONS:1}
+  dead-letter-replication-factor: ${ACCOUNTS_DEAD_LETTER_REPLICATION_FACTOR:1}
 
 logging:
   level:
@@ -31,7 +41,9 @@ management:
         include: health,info,metrics,circuitbreakerevents,circuitbreakers
   endpoint:
     health:
-      show-details: always
+      show-details: when-authorized
+      probes:
+        enabled: true
 
 springdoc:
   swagger-ui:
