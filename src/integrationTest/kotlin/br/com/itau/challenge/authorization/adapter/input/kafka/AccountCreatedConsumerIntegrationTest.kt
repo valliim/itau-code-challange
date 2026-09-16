@@ -20,6 +20,8 @@ import kotlin.test.fail
 @SpringBootTest
 @TestPropertySource(
     properties = [
+        "dynamodb.endpoint=http://localhost:8000",
+        "dynamodb.use-static-credentials=true",
         $$"spring.kafka.consumer.group-id=account-created-consumer-it-${random.uuid}",
         "spring.kafka.consumer.auto-offset-reset=earliest",
     ],

@@ -1,6 +1,7 @@
 package br.com.itau.challenge.authorization.adapter.input.kafka.config
 
 import org.apache.kafka.clients.admin.NewTopic
+import org.apache.kafka.common.TopicPartition
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -37,7 +38,9 @@ class KafkaConsumerConfig(
 
     @Bean
     fun kafkaErrorHandler(kafkaTemplate: KafkaTemplate<String, String>): DefaultErrorHandler {
-        val recoverer = DeadLetterPublishingRecoverer(kafkaTemplate)
+        val recoverer = DeadLetterPublishingRecoverer(kafkaTemplate) { record, _ ->
+            TopicPartition(record.topic() + deadLetterSuffix, record.partition())
+        }
         return DefaultErrorHandler(
             recoverer,
             FixedBackOff(retryIntervalMillis, maxRetries),
