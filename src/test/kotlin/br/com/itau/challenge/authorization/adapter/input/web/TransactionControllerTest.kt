@@ -149,7 +149,34 @@ class TransactionControllerTest(
         }.andExpect {
             status { isBadRequest() }
             jsonPath("$.code") { value("VALIDATION_ERROR") }
-            jsonPath("$.message") { value(containsString("amount.currency must be a valid ISO-4217 code")) }
+            jsonPath("$.message") { value(containsString("amount.currency must be BRL")) }
+        }
+
+        verifyNoInteractions(authorizeTransactionUseCase)
+    }
+
+    @Test
+    fun `should reject a currency other than BRL`() {
+        mockMvc.post("/transactions/tx-1") {
+            contentType = MediaType.APPLICATION_JSON
+            content = """{"account_id": "$ACCOUNT_ID", "type": "CREDIT", "amount": {"value": 10, "currency": "USD"}}"""
+        }.andExpect {
+            status { isBadRequest() }
+            jsonPath("$.code") { value("VALIDATION_ERROR") }
+            jsonPath("$.message") { value(containsString("amount.currency must be BRL")) }
+        }
+
+        verifyNoInteractions(authorizeTransactionUseCase)
+    }
+
+    @Test
+    fun `should reject a transaction id that exceeds the supported length`() {
+        mockMvc.post("/transactions/${"x".repeat(101)}") {
+            contentType = MediaType.APPLICATION_JSON
+            content = REQUEST_BODY
+        }.andExpect {
+            status { isBadRequest() }
+            jsonPath("$.code") { value("VALIDATION_ERROR") }
         }
 
         verifyNoInteractions(authorizeTransactionUseCase)

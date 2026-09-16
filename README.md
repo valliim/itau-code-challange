@@ -174,8 +174,8 @@ sequenceDiagram
 - O **saldo inicial zero** é decidido em `CreateAccountService` (regra de negócio), não no adapter.
 - A escrita usa `attribute_not_exists(accountId)`, portanto **eventos duplicados são idempotentes**:
   a conta já existente não é sobrescrita (log `WARN`).
-- Payload inválido gera log `WARN` e a exceção é propagada para o *error handler* do Kafka, sem
-  travar o consumo das mensagens seguintes.
+- Payload inválido gera log `WARN`, sofre retry com backoff e é encaminhado para o dead-letter topic
+  `${ACCOUNTS_TOPIC}.DLT` após as tentativas configuradas, sem travar o consumo das mensagens seguintes.
 
 ### Autorização de transações (REST)
 
@@ -213,7 +213,7 @@ O `transactionId` é gerado pelo chamador e informado na URL; ele é a chave de 
 | `account_id` | UUID (string) | sim | precisa ser um UUID válido |
 | `type` | string | sim | `CREDIT` ou `DEBIT` (case-insensitive) |
 | `amount.value` | number | sim | deve ser **maior que zero** |
-| `amount.currency` | string | sim | código ISO 4217 (`^[A-Z]{3}$`, ex.: `BRL`) |
+| `amount.currency` | string | sim | deve ser `BRL` |
 
 ```bash
 curl -i -X POST http://localhost:8080/transactions/8e8ae808-b154-48b5-9f3e-553935cc4543 \
@@ -245,6 +245,8 @@ curl -i -X POST http://localhost:8080/transactions/8e8ae808-b154-48b5-9f3e-55393
 
 - `transaction.status` é `SUCCEEDED` quando aprovada e `FAILED` quando recusada (conta inexistente ou
   saldo insuficiente) — recusa de negócio **não** é erro HTTP, continua sendo `200`.
+- Apenas contas com `status: ENABLED` podem autorizar transações; outros status retornam
+  `400 INVALID_TRANSACTION`.
 - Reenviar o mesmo `transactionId` devolve o resultado já persistido, sem reaplicar o efeito no saldo.
 
 **Respostas de erro** (corpo `ErrorResponse`: `{ "code": "...", "message": "..." }`)
@@ -260,8 +262,9 @@ curl -i -X POST http://localhost:8080/transactions/8e8ae808-b154-48b5-9f3e-55393
 
 ### Endpoints operacionais (Actuator)
 
-`GET /actuator/health`, `/actuator/info`, `/actuator/metrics`, `/actuator/circuitbreakers` e
-`/actuator/circuitbreakerevents`.
+`GET /actuator/health`, `/actuator/health/liveness`, `/actuator/health/readiness`,
+`/actuator/info`, `/actuator/metrics`, `/actuator/circuitbreakers` e
+`/actuator/circuitbreakerevents`. Detalhes de health ficam ocultos para requisições não autorizadas.
 
 ## Documentação interativa (Swagger)
 
@@ -361,6 +364,13 @@ Decisões:
 - Logs SLF4J com mensagens em inglês nos pontos de negócio: início e resultado da autorização (INFO),
   recusas por conta inexistente/saldo insuficiente (WARN), conflito otimista (WARN), esgotamento de
   tentativas (ERROR), evento recebido (INFO) e payload inválido (WARN).
+- Métricas Micrometer `authorization.transactions` contabilizam autorizações aprovadas, recusadas por
+  motivo (`account_not_found` e `insufficient_funds`) e replays detectados.
+- Métricas Micrometer `authorization.account.events` contabilizam eventos de criação de conta
+  processados, enquanto `authorization.kafka.account.events` contabilizam eventos Kafka processados,
+  inválidos ou falhos.
+- `authorization.duration` mede a duração das autorizações e `authorization.balance.conflicts`
+  contabiliza conflitos de versão durante o retry otimista.
 - **Correlação via MDC:** `transactionId` e `accountId` são publicados no MDC e limpos em `finally`
   (sem vazamento entre requisições/mensagens). O padrão de log inclui os dois campos:
 
@@ -391,8 +401,18 @@ Decisões:
 | `KAFKA_BOOTSTRAP_SERVERS` | `localhost:19092` | brokers Kafka/Redpanda |
 | `KAFKA_CONSUMER_GROUP_ID` | `authorization-account-created-consumer` | consumer group |
 | `ACCOUNTS_TOPIC` | `conta-bancaria-criada` | tópico de contas criadas |
-| `DYNAMODB_ENDPOINT` | `http://localhost:8000` | endpoint do DynamoDB |
+| `ACCOUNTS_DEAD_LETTER_SUFFIX` | `.DLT` | sufixo do tópico de dead letter |
+| `ACCOUNTS_RETRY_INTERVAL_MILLIS` | `1000` | intervalo fixo entre retries do consumidor Kafka |
+| `ACCOUNTS_MAX_RETRIES` | `2` | quantidade máxima de retries antes da DLQ |
+| `ACCOUNTS_DEAD_LETTER_PARTITIONS` | `1` | partições do tópico de dead letter |
+| `ACCOUNTS_DEAD_LETTER_REPLICATION_FACTOR` | `1` | fator de replicação do tópico de dead letter |
+| `DYNAMODB_USE_STATIC_CREDENTIALS` | `false` | usa credenciais estáticas locais; mantenha `false` na AWS |
+| `DYNAMODB_STATIC_ACCESS_KEY` | `local` | access key usada apenas quando credenciais estáticas estão habilitadas |
+| `DYNAMODB_STATIC_SECRET_KEY` | `local` | secret key usada apenas quando credenciais estáticas estão habilitadas |
+| `DYNAMODB_ENDPOINT` | vazio | endpoint opcional; vazio usa o endpoint padrão da AWS |
 | `DYNAMODB_REGION` | `us-east-1` | região AWS |
+| `DYNAMODB_API_CALL_TIMEOUT` | `5s` | timeout total de uma chamada ao DynamoDB |
+| `DYNAMODB_API_CALL_ATTEMPT_TIMEOUT` | `2s` | timeout de cada tentativa ao DynamoDB |
 | `ACCOUNTS_TABLE_NAME` | `Accounts` | tabela de contas |
 | `TRANSACTIONS_TABLE_NAME` | `Transactions` | tabela de transações |
 | `LOG_LEVEL_APP` | `INFO` | nível de log de `br.com.itau.challenge` |
@@ -587,10 +607,11 @@ o contrato de sucesso:
 ## O que faria com mais tempo
 
 - **GSI por `accountId` em `Transactions`** para extrato/consulta de histórico.
-- **Dead letter topic** para payloads inválidos, hoje apenas logados e propagados ao *error handler*.
+- **Dead letter topic** para payloads inválidos, com retry/backoff e encaminhamento para
+  `${ACCOUNTS_TOPIC}.DLT` após falha permanente. Payloads JSON inválidos são não-retryable e vão
+  diretamente para a DLQ; falhas do caso de uso continuam usando retry.
 - **Métricas de negócio** (autorizações aprovadas/recusadas, conflitos otimistas) e tracing
   distribuído com OpenTelemetry, complementando o MDC atual.
 - **Teste de carga/concorrência** disparando débitos simultâneos na mesma conta para medir a taxa de
   conflito otimista sob carga real.
 - Teste de mutação.
-

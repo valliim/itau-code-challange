@@ -67,11 +67,10 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
 
       - name: Start DynamoDB Local + Redpanda and seed them
-        run: docker compose up -d dynamodb dynamodb-seed redpanda redpanda-seed
+        run: docker compose up -d dynamodb-seed redpanda-seed
 
       - name: Wait for seed jobs to finish
-        run: |
-          timeout 60 docker compose wait dynamodb-seed redpanda-seed
+        run: timeout 120 docker compose wait dynamodb-seed redpanda-seed
 
       - name: Run integration tests (./gradlew integrationTest)
         run: ./gradlew integrationTest --no-daemon

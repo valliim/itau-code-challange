@@ -28,12 +28,14 @@ class AccountCreatedConsumerTest {
     }
 
     @Test
-    fun `should discard the event and keep consuming when the payload is invalid`() {
+    fun `should propagate invalid payloads to the Kafka error handler`() {
         val createdAccounts = mutableListOf<NewAccount>()
         val useCase = CreateAccountUseCase { createdAccounts.add(it) }
         val consumer = AccountCreatedConsumer(useCase, objectMapper)
 
-        consumer.consume("not-a-valid-json-payload")
+        assertFailsWith<Exception> {
+            consumer.consume("not-a-valid-json-payload")
+        }
 
         assertEquals(emptyList(), createdAccounts)
     }
